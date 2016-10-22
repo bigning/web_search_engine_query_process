@@ -71,54 +71,67 @@ void SearchEngine::read_in_words_and_urls() {
     doc_num_ = docs_.size();
 }
 
-bool SearchEngine::open_list(std::string& word, PostingList& posting_list) {
+bool SearchEngine::open_list(std::string& word, 
+        PostingList& posting_list) {
     std::map<std::string, WordInfo>::iterator iter =
         words_.find(word);
     if (iter == words_.end()) {
         return false;
     }
-    posting_list = PostingList(iter->second.start_position, 
-            iter->second.end_position, iter->second.start_position);
+
+    posting_list.postings.clear();
+    long long start = iter->second.start_position;
+    long long end = iter->second.end_position;
+    int int_num = (end - start) / sizeof(int);
+    int* int_buffer = new int[int_num];
+
+    // read postings to memory
+    inverted_index_file_.seekg(start);
+    inverted_index_file_.read((char*)int_buffer, end - start);
+    int doc_id = 0, freq = 0;
+    int index = 0;
+    while (index < int_num) {
+        doc_id = int_buffer[index++];
+        freq = int_buffer[index++];
+        std::vector<int> positions;
+        for (int i = 0; i < freq; i++) {
+            positions.push_back(int_buffer[index++]);
+        }
+        PostingInfo posting_info(doc_id, freq, positions);
+        posting_list.postings.push_back(posting_info);
+    }
+    posting_list.current = -1;
+    
+    delete[] int_buffer;
     return true;
 }
 
 /*
  * find the next posting in list posting_list with doc_id>=k,
- * return corresponding posting_info with such doc_id,
- * if none exists, return false
+ * return doc_id,
+ * if none exists, doc_num_ 
 */
-bool SearchEngine::next_geq(PostingList& posting_list, int k,
-        PostingInfo& posting_info) {
-    if (posting_list.current >= posting_list.end) return false;
+int SearchEngine::next_geq(PostingList& posting_list, int k) {
+    posting_list.current++;
+    if (posting_list.current >= posting_list.postings.size()) return doc_num_;
 
-    get_current_posting_info(posting_list.current, posting_info);
-    if (posting_info.doc_id >= k) return true;
-
-    while (posting_info.doc_id < k && posting_list.current < posting_list.end) {
-        get_current_posting_info(posting_list.current, posting_info);
+    while (posting_list.current < posting_list.postings.size() &&
+        posting_list.postings[posting_list.current].doc_id < k) {
+        posting_list.current++;
     }
 
-    if (posting_info.doc_id >= k) return true;
-    return false;
+    if (posting_list.current >= posting_list.postings.size()) return doc_num_;
+    return posting_list.postings[posting_list.current].doc_id;
 }
 
-void SearchEngine::get_current_posting_info(long long& current_pos,
-        PostingInfo& posting_info) {
-    inverted_index_file_.seekg(current_pos);
-    int doc_id = 0;
-    int freq = 0;
-    int pos = 0;
-    inverted_index_file_.read((char*)(&doc_id), sizeof(doc_id));
-    inverted_index_file_.read((char*)(&freq), sizeof(freq));
-    std::vector<int> positions;
-    for (int i = 0; i < freq; i++) {
-        inverted_index_file_.read((char*)(&pos), sizeof(pos));
-        positions.push_back(pos);
+int SearchEngine::get_freq(PostingList& posting_list) {
+    if (posting_list.current >= posting_list.postings.size()) {
+        std::cout << 
+            "[ERROR]: posting_list.current >= posting_list.postings.size()" 
+            << std::endl;
+        return -1;
     }
-    posting_info.doc_id = doc_id;
-    posting_info.freq = freq;
-    posting_info.pos = positions;
-    current_pos += (2 + positions.size()) * sizeof(int);
+    return posting_list.postings[posting_list.current].freq;
 }
 
 int main() {

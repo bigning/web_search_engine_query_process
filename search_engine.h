@@ -25,16 +25,14 @@ struct PostingInfo {
     int doc_id;
     int freq;
     std::vector<int> pos;
+
+    PostingInfo(int doc_id_, int freq_, std::vector<int>& pos_):
+        doc_id(doc_id_), freq(freq_), pos(pos_) {}
 };
 
 struct PostingList {
-    long long start;
-    long long end;
-    long long current;
-
-    PostingList(long long start_, long long end_, long long current_): 
-        start(start_), end(end_), current(current_) {}
-    PostingList(): start(-1), end(-1), current(-1) {}
+    std::vector<PostingInfo> postings;
+    int current;
 };
 
 class SearchEngine {
@@ -42,6 +40,7 @@ public:
     SearchEngine();
     void run();
     void test();
+    
     
 private:
     std::string data_path_;
@@ -53,7 +52,8 @@ private:
     std::ifstream inverted_index_file_;
 
     void read_in_words_and_urls();
+
     bool open_list(std::string& word, PostingList& posting_list);
-    bool next_geq(PostingList& posting_list, int k, PostingInfo& posting_info);
-    void get_current_posting_info(long long& current_pos, PostingInfo& posting_info);
+    int next_geq(PostingList& posting_list, int k);
+    int get_freq(PostingList& posting_list);
 };
