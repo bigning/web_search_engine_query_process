@@ -35,6 +35,14 @@ struct PostingList {
     int current;
 };
 
+struct Query {
+    bool is_conjunctive;
+    std::vector<std::string> words;
+
+    Query(bool is_conjunctive_, std::vector<std::string>& words_):
+    is_conjunctive(is_conjunctive_), words(words_){}
+};
+
 class SearchEngine {
 public:
     SearchEngine();
@@ -56,4 +64,6 @@ private:
     bool open_list(std::string& word, PostingList& posting_list);
     int next_geq(PostingList& posting_list, int k);
     int get_freq(PostingList& posting_list);
+
+    Query get_query();
 };

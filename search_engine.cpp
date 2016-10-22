@@ -1,5 +1,8 @@
 #include "search_engine.h"
 #include <fstream>
+#include <stdio.h>
+#include <iostream>
+#include <sstream>
 
 SearchEngine::SearchEngine() {
     data_path_ = "../data/postings_from_doc/";
@@ -11,13 +14,15 @@ void SearchEngine::run() {
     read_in_words_and_urls();
 
     test();
+    get_query();
 }
 
 void SearchEngine::test() {
     PostingList posting_list;
     std::string word = "additives";
     if (open_list(word, posting_list)) {
-        //next_geq(posting_list, 10);
+        std::cout << posting_list.postings.size() << std::endl 
+            << posting_list.postings[0].doc_id << " " << posting_list.postings[0].freq << " " << posting_list.postings[0].pos[0] << std::endl;
     } else {
         std::cout << "no posting for " << word << std::endl;
     }
@@ -132,6 +137,42 @@ int SearchEngine::get_freq(PostingList& posting_list) {
         return -1;
     }
     return posting_list.postings[posting_list.current].freq;
+}
+
+Query SearchEngine::get_query() {
+    char c;
+    do {
+        std::cout << "0 for disjunctive query, 1 for conjunctive query: " << std::endl;
+        scanf("%c", &c);
+    } while (c != '0' && c != '1');
+    bool is_conjunctive;
+    if (c == '0') {
+        is_conjunctive = false;
+    } else {
+        is_conjunctive = true;
+    }
+    std::vector<std::string> words;
+    std::string tmp;
+    std::getline(std::cin, tmp);
+    std::cout << "please input query words: " << std::endl;
+    std::getline(std::cin, tmp);
+    std::istringstream iss(tmp);
+    std::string word;
+    while (iss >> word) {
+        words.push_back(word);
+    }
+    std::cout << std::endl << "[INFO]: "; 
+    if (is_conjunctive) {
+        std::cout << "CONJUNCTIVE QUERY: ";
+    } else {
+        std::cout << "DISJUNCTIVE QUERY: ";
+    }
+    for (int i = 0; i < words.size(); i++) {
+        std::cout << words[i] << " ";
+    }
+    std::cout << std::endl;
+    
+    return Query(is_conjunctive, words);
 }
 
 int main() {
