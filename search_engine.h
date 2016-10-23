@@ -15,9 +15,9 @@ struct DocInfo {
     int doc_id;
     std::string url;
     int length;
-    int start_position;
+    long long start_position;
 
-    DocInfo(int doc_id_, std::string url_, int length_, int pos_):
+    DocInfo(int doc_id_, std::string url_, int length_, long long pos_):
         doc_id(doc_id_), url(url_), length(length_), start_position(pos_) {}
 };
 
@@ -35,6 +35,16 @@ struct PostingList {
     int current;
 };
 
+struct QueryRes {
+    int doc_id;
+    float score;
+    std::vector<std::vector<int> > pos;
+
+    bool operator<(const QueryRes& r) const {
+        return score > r.score;
+    }
+};
+
 struct Query {
     bool is_conjunctive;
     std::vector<std::string> words;
@@ -48,7 +58,7 @@ public:
     SearchEngine();
     void run();
     void test();
-    
+    void process_conjunctive_query(Query& query);
     
 private:
     std::string data_path_;
@@ -56,6 +66,9 @@ private:
     std::map<std::string, WordInfo> words_;
     std::vector<DocInfo> docs_;
     int doc_num_;
+    int top_k_;
+
+    std::ifstream new_text_file_;
     
     std::ifstream inverted_index_file_;
 
@@ -66,4 +79,10 @@ private:
     int get_freq(PostingList& posting_list);
 
     Query get_query();
+    void preprocess_query(Query& query);
+    QueryRes generate_query_res(std::vector<PostingList>& posting_list_vec,
+            Query& query, int doc_id);
+    void insert_into_top_k(std::vector<QueryRes>& resutls, QueryRes& res);
+
+    void display_results(Query& query, std::vector<QueryRes>& results);
 };

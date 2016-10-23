@@ -1,11 +1,18 @@
+#include "color.h"
 #include "search_engine.h"
 #include <fstream>
 #include <stdio.h>
 #include <iostream>
 #include <sstream>
+#include <math.h>
+#include <algorithm>
+#include <iterator>
+#include <set>
 
 SearchEngine::SearchEngine() {
     data_path_ = "../data/postings_from_doc/";
+    top_k_ = 20;
+    new_text_file_.open((data_path_ + "new_text").c_str(), std::ios::binary);
 }
 
 void SearchEngine::run() {
@@ -13,8 +20,175 @@ void SearchEngine::run() {
             std::ifstream::binary);
     read_in_words_and_urls();
 
-    test();
-    get_query();
+    while (true) {
+        Query query = get_query();
+        preprocess_query(query);
+        if (query.is_conjunctive) {
+            process_conjunctive_query(query);
+        }
+    }
+}
+
+/* 
+ * remove query words those are not in words_
+*/
+void SearchEngine::preprocess_query(Query& query) {
+    std::vector<std::string> words;
+    for (int i = 0; i < query.words.size(); i++) {
+        if (words_.find(query.words[i]) == words_.end()) {
+            std::cout << "[WARNING]: remove word " << query.words[i]
+                << " from query, because it never appears in all docs" 
+                << std::endl;
+            continue;
+        }
+        words.push_back(query.words[i]);
+    }
+    query.words = words;
+}
+
+void SearchEngine::process_conjunctive_query(Query& query) {
+    if (query.words.size() == 0) {
+        std::cout << "[WARNING]: no valid query word" << std::endl;
+        return;
+    }
+    std::vector<PostingList> posting_list_vec(query.words.size());
+    for (int i = 0; i < query.words.size(); i++) {
+        if (!open_list(query.words[i], posting_list_vec[i])) {
+            std::cout << "[ERROR]: can't open posting list for word: "
+                << query.words[i] << std::endl;
+        }
+    }
+
+    std::vector<QueryRes> query_results;
+    int did = 0;
+    int d = 0;
+    while (did < doc_num_) {
+        did = next_geq(posting_list_vec[0], did);
+        if (did >= doc_num_) break;
+        for (int i = 1; i < query.words.size(); i++) { 
+                //(d = next_geq(posting_list_vec[i], did)) == did; i++) {
+            d = next_geq(posting_list_vec[i], did);
+            if (d != did) break;
+        }
+        if (d > did) { 
+            did = d; /* not in intersection */
+            if (did >= doc_num_) break;
+        } else {
+            QueryRes query_res = generate_query_res(posting_list_vec, query, did);
+            insert_into_top_k(query_results, query_res);
+            did++;
+        }
+    }
+    std::cout << query_results.size() << std::endl;
+    display_results(query, query_results);
+    std::cout << std::endl;
+}
+
+void SearchEngine::display_results(Query& query, std::vector<QueryRes>& results) {
+    for (int i = 0; i < results.size(); i++) {
+        std::cout << std::endl << std::endl << BLUE << i << YELLOW << "\t[doc_id]: " << RESET << results[i].doc_id << YELLOW << ".\t[score]: "
+            << RESET << results[i].score << YELLOW << "\t[url]: " << RESET << docs_[results[i].doc_id].url
+            << std::endl;;
+        std::cout << "\t";
+        for (int k = 0; k < results[i].pos.size(); k++) {
+            std::cout << YELLOW << query.words[k] << ": " << RESET
+                << results[i].pos[k].size() << " ";
+        }
+        std::cout << std::endl;
+
+        long long start = docs_[results[i].doc_id].start_position;
+        long long end;
+        if (results[i].doc_id != doc_num_ - 1) {
+            end = docs_[results[i].doc_id + 1].start_position;
+        } else {
+            new_text_file_.seekg(0, std::ios::end);
+            end = (long long)(new_text_file_.tellg()) + 1;
+        }
+        char* text_buf = new char[end - start];
+        new_text_file_.seekg(start);
+        new_text_file_.read(text_buf, end - start);
+        std::string text(text_buf);
+        
+        std::istringstream iss(text);
+        std::vector<std::string> words;
+        std::copy(std::istream_iterator<std::string>(iss), 
+                std::istream_iterator<std::string>(),
+                std::back_inserter(words));
+        std::string output;
+
+        std::set<std::string> query_words_set;
+        for (int k = 0; k < query.words.size(); k++) {
+            query_words_set.insert(query.words[k]);
+        }
+
+        std::cout << "\t";
+        for (int k = 0; k < results[i].pos.size(); k++) {
+            if (results[i].pos[k].size() == 0) continue;
+            //for (int j = 0; j < results[i].pos[k].size(); j++) {
+            for (int j = 0; j < 1; j++) {
+                int start_ind = results[i].pos[k][j] - 5 > 0 ? 
+                    results[i].pos[k][j] - 5 : 0;
+                int end_ind = results[i].pos[k][j] + 5 < words.size() ? 
+                    results[i].pos[k][j] + 5 : words.size();
+                std::cout << "...";
+                for (int m = start_ind; m < end_ind; m++) {
+                    //if (words[m] == query.words[k]) {
+                    if (query_words_set.find(words[m]) != query_words_set.end()) {
+                        std::cout << RED << words[m] << RESET << " ";
+                    } else {
+                        std::cout << words[m] << " ";
+                    }
+                }
+                std::cout << "... ";
+            }
+        }
+
+        delete[] text_buf;
+    }
+    std::cout << std::endl << std::endl;
+}
+
+void SearchEngine::insert_into_top_k(std::vector<QueryRes>& results,
+        QueryRes& res) {
+    results.push_back(res);
+    std::sort(results.begin(), results.end());
+    if (results.size() > top_k_) {
+        std::vector<QueryRes> tmp_res(results.begin(), results.begin() + top_k_);
+        results = tmp_res;
+    }
+}
+
+QueryRes SearchEngine::generate_query_res(
+        std::vector<PostingList>& posting_list_vec,
+        Query& query, int doc_id) {
+    QueryRes res;
+    res.doc_id = doc_id;
+    res.pos = std::vector<std::vector<int> >(query.words.size());
+    for (int i = 0; i < query.words.size(); i++) {
+        res.pos[i] = posting_list_vec[i].postings[posting_list_vec[i].current].pos;
+    }
+
+    float k1 = 1.2;
+    float b = 0.75;
+    float N = (float)doc_num_;
+    float score = 0;
+    float d = (float)(docs_[doc_id].length);
+    for (int i = 0; i < query.words.size(); i++) {
+        float tmp_score = 0;
+        float ft = (float)(words_[query.words[i]].num_of_doc_contain_this_word);
+        float left = log((N - ft + 0.5) / (ft + 0.5));
+
+        float fdt = (float)(res.pos[i].size());
+        float right_up = (k1 + 1) * fdt;
+        float K = k1 * ((1 - b) + b * d / average_doc_length_);
+        float right_down = K + fdt;
+        float right = right_up / right_down;
+
+        tmp_score = left * right;
+        score += tmp_score;
+    }
+    res.score = score;
+    return res;
 }
 
 void SearchEngine::test() {
@@ -117,7 +291,7 @@ bool SearchEngine::open_list(std::string& word,
  * if none exists, doc_num_ 
 */
 int SearchEngine::next_geq(PostingList& posting_list, int k) {
-    posting_list.current++;
+    if (posting_list.current < 0) posting_list.current = 0;
     if (posting_list.current >= posting_list.postings.size()) return doc_num_;
 
     while (posting_list.current < posting_list.postings.size() &&
