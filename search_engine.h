@@ -51,6 +51,8 @@ struct Query {
 
     Query(bool is_conjunctive_, std::vector<std::string>& words_):
     is_conjunctive(is_conjunctive_), words(words_){}
+
+    Query() {};
 };
 
 class SearchEngine {
@@ -59,6 +61,7 @@ public:
     void run();
     void test();
     void process_conjunctive_query(Query& query);
+    void process_disjunctive_query(Query& query);
     
 private:
     std::string data_path_;
@@ -81,7 +84,7 @@ private:
     Query get_query();
     void preprocess_query(Query& query);
     QueryRes generate_query_res(std::vector<PostingList>& posting_list_vec,
-            Query& query, int doc_id);
+            Query& query, int doc_id, std::vector<bool>& is_valid);
     void insert_into_top_k(std::vector<QueryRes>& resutls, QueryRes& res);
 
     void display_results(Query& query, std::vector<QueryRes>& results);

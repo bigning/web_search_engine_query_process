@@ -10,7 +10,7 @@
 #include <set>
 
 SearchEngine::SearchEngine() {
-    data_path_ = "../data/postings_from_doc/";
+    data_path_ = "../data/postings_from_doc_small/";
     top_k_ = 20;
     new_text_file_.open((data_path_ + "new_text").c_str(), std::ios::binary);
 }
@@ -25,6 +25,8 @@ void SearchEngine::run() {
         preprocess_query(query);
         if (query.is_conjunctive) {
             process_conjunctive_query(query);
+        } else {
+            process_disjunctive_query(query);
         }
     }
 }
@@ -62,6 +64,7 @@ void SearchEngine::process_conjunctive_query(Query& query) {
     std::vector<QueryRes> query_results;
     int did = 0;
     int d = 0;
+    std::vector<bool> is_valid(posting_list_vec.size(), true);
     while (did < doc_num_) {
         did = next_geq(posting_list_vec[0], did);
         if (did >= doc_num_) break;
@@ -74,12 +77,79 @@ void SearchEngine::process_conjunctive_query(Query& query) {
             did = d; /* not in intersection */
             if (did >= doc_num_) break;
         } else {
-            QueryRes query_res = generate_query_res(posting_list_vec, query, did);
+            QueryRes query_res = generate_query_res(posting_list_vec, query, did,
+                    is_valid);
             insert_into_top_k(query_results, query_res);
             did++;
         }
     }
-    std::cout << query_results.size() << std::endl;
+    //std::cout << query_results.size() << std::endl;
+    display_results(query, query_results);
+    std::cout << std::endl;
+}
+
+void SearchEngine::process_disjunctive_query(Query& query) {
+    if (query.words.size() == 0) {
+        std::cout << "[WARNING]: no valid query word" << std::endl;
+        return;
+    }
+    std::vector<PostingList> posting_list_vec(query.words.size());
+    for (int i = 0; i < query.words.size(); i++) {
+        if (!open_list(query.words[i], posting_list_vec[i])) {
+            std::cout << "[ERROR]: can't open posting list for word: "
+                << query.words[i] << std::endl;
+        }
+    }
+    std::vector<QueryRes> query_results;
+
+    int current_mimimum = doc_num_;
+    for (int i = 0; i < query.words.size(); i++) {
+        if (posting_list_vec[i].postings[0].doc_id < current_mimimum) {
+            current_mimimum = posting_list_vec[i].postings[0].doc_id;
+        }
+    }
+    int next_mimimum = doc_num_;
+    while (current_mimimum < doc_num_) {
+        std::vector<PostingList> tmp_posting_list_vec;
+        std::vector<bool> is_valid;
+        int doc_id = 0;
+        for (int i = 0; i < posting_list_vec.size(); i++) {
+            doc_id = next_geq(posting_list_vec[i], current_mimimum);
+            if (doc_id == current_mimimum) {
+                tmp_posting_list_vec.push_back(posting_list_vec[i]);
+                is_valid.push_back(true);
+            } else {
+                if (doc_id < next_mimimum) {
+                    next_mimimum = doc_id;
+                }
+                is_valid.push_back(false);
+            }
+        }
+
+        if (tmp_posting_list_vec.size() > 0) {
+            QueryRes query_res = generate_query_res(posting_list_vec, 
+                    query, current_mimimum, is_valid);
+            insert_into_top_k(query_results, query_res);
+        }
+        if (tmp_posting_list_vec.size() == posting_list_vec.size()) {
+            next_mimimum = doc_num_;
+            for (int i = 0; i < query.words.size(); i++) {
+                if (posting_list_vec[i].current + 1 < 
+                     posting_list_vec[i].postings.size() &&
+                     posting_list_vec[i].
+                     postings[posting_list_vec[i].current + 1].doc_id
+                     < next_mimimum) {
+                    next_mimimum = posting_list_vec[i].postings
+                        [posting_list_vec[i].current + 1].doc_id;
+                }
+            }
+        }
+
+        current_mimimum = next_mimimum;
+        next_mimimum = doc_num_;
+    }
+
+    std::cout << "results: " << query_results.size() << std::endl;
     display_results(query, query_results);
     std::cout << std::endl;
 }
@@ -125,21 +195,23 @@ void SearchEngine::display_results(Query& query, std::vector<QueryRes>& results)
         for (int k = 0; k < results[i].pos.size(); k++) {
             if (results[i].pos[k].size() == 0) continue;
             //for (int j = 0; j < results[i].pos[k].size(); j++) {
-            for (int j = 0; j < 1; j++) {
-                int start_ind = results[i].pos[k][j] - 5 > 0 ? 
-                    results[i].pos[k][j] - 5 : 0;
-                int end_ind = results[i].pos[k][j] + 5 < words.size() ? 
-                    results[i].pos[k][j] + 5 : words.size();
-                std::cout << "...";
-                for (int m = start_ind; m < end_ind; m++) {
-                    //if (words[m] == query.words[k]) {
-                    if (query_words_set.find(words[m]) != query_words_set.end()) {
-                        std::cout << RED << words[m] << RESET << " ";
-                    } else {
-                        std::cout << words[m] << " ";
+            if (results[i].pos[k].size() >= 1) {
+                for (int j = 0; j < 1; j++) {
+                    int start_ind = results[i].pos[k][j] - 5 > 0 ? 
+                        results[i].pos[k][j] - 5 : 0;
+                    int end_ind = results[i].pos[k][j] + 5 < words.size() ? 
+                        results[i].pos[k][j] + 5 : words.size();
+                    std::cout << "...";
+                    for (int m = start_ind; m < end_ind; m++) {
+                        //if (words[m] == query.words[k]) {
+                        if (query_words_set.find(words[m]) != query_words_set.end()) {
+                            std::cout << RED << words[m] << RESET << " ";
+                        } else {
+                            std::cout << words[m] << " ";
+                        }
                     }
+                    std::cout << "... ";
                 }
-                std::cout << "... ";
             }
         }
 
@@ -160,11 +232,12 @@ void SearchEngine::insert_into_top_k(std::vector<QueryRes>& results,
 
 QueryRes SearchEngine::generate_query_res(
         std::vector<PostingList>& posting_list_vec,
-        Query& query, int doc_id) {
+        Query& query, int doc_id, std::vector<bool>& is_valid) {
     QueryRes res;
     res.doc_id = doc_id;
     res.pos = std::vector<std::vector<int> >(query.words.size());
-    for (int i = 0; i < query.words.size(); i++) {
+    for (int i = 0; i < posting_list_vec.size(); i++) {
+        if (!is_valid[i]) continue;
         res.pos[i] = posting_list_vec[i].postings[posting_list_vec[i].current].pos;
     }
 
@@ -174,6 +247,9 @@ QueryRes SearchEngine::generate_query_res(
     float score = 0;
     float d = (float)(docs_[doc_id].length);
     for (int i = 0; i < query.words.size(); i++) {
+        if (!is_valid[i]) {
+            continue;
+        }
         float tmp_score = 0;
         float ft = (float)(words_[query.words[i]].num_of_doc_contain_this_word);
         float left = log((N - ft + 0.5) / (ft + 0.5));
