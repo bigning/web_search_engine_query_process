@@ -1,1 +1,1 @@
-g++ -g search_engine.cpp -o search_engine
+g++ -O3 search_engine.cpp -o search_engine
